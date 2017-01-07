@@ -6,6 +6,7 @@ use Yii;
 use yii\base\DynamicModel;
 use app\models\GeetestLib;
 use yii\base\Exception;
+use yii\web\Response;
 
 class GeetestCaptchaAction extends Action
 {
@@ -17,28 +18,34 @@ class GeetestCaptchaAction extends Action
     public function init()
     {
         if (!($this->_captcha_id && $this->_private_key) || !($this->_mobile_captcha_id && $this->_mobile_private_key)) {
-            throw new Exception('Unset Geetest Keys');
+            throw new Exception('Geetest Is Not Available');
         }
     }
 
     public function run()
     {
-        $phone = Yii::$app->request->get('phone');
+        $action = Yii::$app->request->get('action');
         $type = Yii::$app->request->get('type');
 
-        $model = DynamicModel::validateData(compact('phone', 'type'), [
-            [['phone'], 'required'],
+        $model = DynamicModel::validateData(compact('action', 'type'), [
+            [['action'], 'required'],
+            [['action'], 'string', 'length' => [1, 32]],
             [['type'], 'in', 'range' => ['pc', 'mobile']],
         ]);
         if ($model->hasErrors()) {
-            return $model->getErrors();
+            return $this->reply(['info' => $model->getErrors()], 'failed', 1);
         }
 
-        $geetest = $this->getGeetest($type);
-        Yii::$app->session->set('geetest_phone', $phone);
-        Yii::$app->session->set('geetest_status', $geetest->pre_process($phone));
+        try {
+            $geetest = $this->getGeetest($type);
+            $user_id = uniqid();
+            Yii::$app->session->set('geetest_user' . $action, $user_id);
+            Yii::$app->session->set('geetest_status' . $action, $geetest->pre_process($user_id));
+        } catch (Exception $e) {
+            return $this->reply([], 'failed', 1);
+        }
 
-        return $geetest->get_response_str();
+        return $this->reply($geetest->get_response_str(), 'success', 0);
     }
 
     public function validate($input, $type = 'pc')
@@ -46,16 +53,21 @@ class GeetestCaptchaAction extends Action
         $geetest_challenge = $input['geetest_challenge'];
         $geetest_validate = $input['geetest_validate'];
         $geetest_seccode = $input['geetest_seccode'];
+        $action = $input['action'];
 
-        $phone = Yii::$app->session->get('geetest_phone');
-        $status = Yii::$app->session->get('geetest_status');
+        $phone = Yii::$app->session->get('geetest_user' . $action);
+        $status = Yii::$app->session->get('geetest_status' . $action);
 
-        $geetest = $this->getGeetest($type);
+        try {
+            $geetest = $this->getGeetest($type);
 
-        if ($status == 1) {
-            $result = $geetest->success_validate($geetest_challenge, $geetest_validate, $geetest_seccode, $phone);
-        } else {
-            $result = $geetest->fail_validate($geetest_challenge, $geetest_validate, $geetest_seccode);
+            if ($status == 1) {
+                $result = $geetest->success_validate($geetest_challenge, $geetest_validate, $geetest_seccode, $phone);
+            } else {
+                $result = $geetest->fail_validate($geetest_challenge, $geetest_validate, $geetest_seccode);
+            }
+        } catch (Exception $e) {
+            return false;
         }
 
         return $result;
@@ -68,5 +80,15 @@ class GeetestCaptchaAction extends Action
         } else {
             return new GeetestLib($this->_captcha_id, $this->_private_key);
         }
+    }
+
+    protected function reply($data, $message, $code)
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+        return [
+            'data' => $data,
+            'message' => $message,
+            'code' => $code,
+        ];
     }
 }
