@@ -7,4 +7,26 @@ Yii2 Geetest
 Usage
 ---
 
-TBD
+```php
+Controller
+
+public function actions()
+{
+    return [
+        'geetest' => [
+            'class' => 'app\components\GeetestCaptchaAction',
+        ],
+    ];
+}
+```
+
+Model
+
+```php
+public function rules()
+{
+    return [
+        ['captcha', app\components\GeetestValidator::className()],
+    ];
+}
+```
